@@ -13,13 +13,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Descomprimir el proyecto
+      - name: Elegir el zip con la versión más alta
         run: |
           shopt -s nullglob
-          for z in *.zip; do unzip -o -q "$z" -d _src; done
-          F=$(find _src . -name settings.gradle -not -path './.git/*' 2>/dev/null | head -n 1)
-          if [ -z "$F" ]; then echo "Todavía no hay proyecto: sube ShutTheBox.zip"; exit 0; fi
-          echo "PROJ=$(dirname "$F")" >> $GITHUB_ENV
+          best=""; bestv=-1; i=0
+          for z in *.zip; do
+            i=$((i+1)); d="_src/$i"; mkdir -p "$d"; unzip -o -q "$z" -d "$d"
+            g=$(find "$d" -path '*/app/build.gradle' | head -n 1)
+            [ -z "$g" ] && continue
+            v=$(grep -oE 'versionCode +[0-9]+' "$g" | grep -oE '[0-9]+' | head -n 1)
+            echo "$z -> versionCode ${v:-?}"
+            if [ "${v:-0}" -gt "$bestv" ]; then bestv=${v:-0}; best=$(dirname "$(dirname "$g")"); fi
+          done
+          if [ -z "$best" ]; then echo "Todavía no hay proyecto: sube ShutTheBox.zip"; exit 0; fi
+          vn=$(grep -oE 'versionName +"[^"]+"' "$best/app/build.gradle" | grep -oE '"[^"]+"' | tr -d '"')
+          echo "Compilando $best (versión $vn)"
+          echo "PROJ=$best" >> $GITHUB_ENV
+          echo "VNAME=$vn" >> $GITHUB_ENV
 
       - name: Validar la lógica del juego
         if: env.PROJ != ''
@@ -44,14 +54,14 @@ jobs:
         run: |
           cd "$PROJ"
           gradle assembleDebug --no-daemon --stacktrace
-          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/ShutTheBox.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/ShutTheBox-$VNAME.apk"
 
       - name: Publicar APK en Releases
         if: env.PROJ != ''
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.1.${{ github.run_number }}
-          name: Shut the Box 1.1.${{ github.run_number }}
-          body: APK listo para instalar. Descarga ShutTheBox.apk y ábrelo en el móvil.
-          files: ShutTheBox.apk
+          tag_name: v${{ env.VNAME }}-${{ github.run_number }}
+          name: Shut the Box ${{ env.VNAME }}
+          body: APK listo para instalar.
+          files: ShutTheBox-${{ env.VNAME }}.apk
           make_latest: true
